@@ -2,7 +2,7 @@
 
 # Default .bashrc
 # Original Author: Samuel Roeca
-#  
+#
 # Use this file to:
 #   Import .profile and ~/.bash/sensitive (using the provided "include")
 #   Execute some "basic" commands
@@ -32,15 +32,71 @@ path_radd() {
   fi
 }
 
-la(){
-  #executes "ls -la "
-  ls -la
-}
-
 today(){
   #shows today's date
   echo -n "Today's date is:"
   date +"%A, %B %-d, %Y"
+}
+
+
+function nth_row() {
+  # 1st arg: s3 path
+  # 2nd arg: row # that triggered the stl load error
+  # example: nth_row s3://testingcopy/zliu/test.csv 32
+  # to extract and display the 32nd row of this file
+  local filename=$(basename -- "$1")
+  local extension="${filename##*.}"
+  # fiq: file in question
+  local local_filename="fiq.${filename}"
+
+  # copy the s3 file to local box
+  aws s3 cp $1 $local_filename
+
+  # deal with compressed file
+  local proceed=true
+  local comp_type=$(file $local_filename)
+  if [[ "$comp_type" == *"bzip2"* ]]; then
+    bzip2 -d $local_filename
+    # trim the extension because it's decompressed
+    local local_filename=${local_filename%.*}
+  elif [[ "$comp_type" == *"gzip"* ]]; then
+    gunzip $local_filename
+    # trim the extension because it's decompressed
+    local local_filename=${local_filename%.*}
+  else
+    if [[ $extension != "csv" && $extension != "tsv" && $extension != "json" ]]; then
+      tput setaf 1;
+      echo -e "Attention: this file is of $extension extension!"
+      echo -e "Can't deal with '$comp_type' this type of file yet!"
+      proceed=false
+    fi
+  fi
+
+  if [[ $proceed = "true" ]]; then
+    # extract the row that caused the issue
+    local txt_type=$(file $local_filename)
+    local total_lines=$(wc -l < $local_filename)
+    if (( $2 > $total_lines )); then
+      tput setaf 1;
+      echo -e "The line you want to see exceed total lines $total_lines"
+      proceed=false
+    else
+      echo "========== See data below =========="
+      if [[ "$txt_type" == *"JSON"* ]]; then
+        sed "${2}q;d" $local_filename | jq
+      else
+        sed "${2}q;d" $local_filename
+      fi
+    fi
+  fi
+
+  # clean-up: remove the downloaded files immediately in case it has PII info
+  if [ -f $local_filename ]; then
+    rm $local_filename
+  fi
+  if [[ $proceed = "false" ]]; then
+    false
+  fi
 }
 # }}}
 # Exported variable: LS_COLORS --- {{{
@@ -151,6 +207,7 @@ if [ -d "$HOME_BIN" ]; then
 fi
 
 # EXPORT THE FINAL, MODIFIED PATH
+export PATH="/home/prestonng/.asdf/installs/poetry/1.2.0/bin:$PATH"
 export PATH
 
 # }}}
@@ -200,6 +257,19 @@ alias l='ls -CF'
 alias pbcopy="perl -pe 'chomp if eof' | xsel --clipboard --input"
 alias pbpaste="xsel --clipboard --output"
 
+#git aliases
+alias gs='git status '
+alias ga='git add '
+alias gb='git branch '
+alias gc='git commit'
+alias gd='git diff'
+alias gco='git checkout '
+alias gk='gitk --all&'
+alias gx='gitx --all'
+
+#poetry aliases
+alias prun='poetry run'
+
 # }}}
 # Functions --- {{{
 
@@ -216,30 +286,72 @@ so() {
 }
 
 # }}}
-# Command line prompt (PS1) --- {{{
+# Bash: prompt (PS1) {{{
 
-COLOR_BRIGHT_GREEN="\033[38;5;10m"
-COLOR_BRIGHT_BLUE="\033[38;5;115m"
-COLOR_RED="\033[0;31m"
-COLOR_YELLOW="\033[0;33m"
-COLOR_GREEN="\033[0;32m"
-COLOR_PURPLE="\033[1;35m"
-COLOR_ORANGE="\033[38;5;202m"
-COLOR_BLUE="\033[34;5;115m"
-COLOR_WHITE="\033[0;37m"
-COLOR_GOLD="\033[38;5;142m"
-COLOR_SILVER="\033[38;5;248m"
-COLOR_RESET="\033[0m"
-BOLD="$(tput bold)"
+PS1_COLOR_BRIGHT_BLUE="\033[38;5;115m"
+PS1_COLOR_RED="\033[0;31m"
+PS1_COLOR_YELLOW="\033[0;33m"
+PS1_COLOR_GREEN="\033[0;32m"
+PS1_COLOR_ORANGE="\033[38;5;202m"
+# PS1_COLOR_GOLD="\033[38;5;142m"
+PS1_COLOR_SILVER="\033[38;5;248m"
+PS1_COLOR_RESET="\033[0m"
+PS1_BOLD="$(tput bold)"
 
-# Set Bash PS1
-PS1_DIR="\[$BOLD\]\[$COLOR_BRIGHT_BLUE\]\w"
-PS1_USR="\[$BOLD\]\[$COLOR_GOLD\]\u@\h"
-PS1_END="\[$BOLD\]\[$COLOR_SILVER\]$ \[$COLOR_RESET\]"
+function ps1_git_color() {
+  local git_status
+  local branch
+  local git_commit
+  git_status="$(git status 2> /dev/null)"
+  branch="$(git rev-parse --abbrev-ref HEAD 2> /dev/null)"
+  git_commit="$(git --no-pager diff --stat "origin/${branch}" 2>/dev/null)"
+  if [[ $git_status == "" ]]; then
+    echo -e "$PS1_COLOR_SILVER"
+  elif [[ $git_status =~ "not staged for commit" ]]; then
+    echo -e "$PS1_COLOR_RED"
+  elif [[ $git_status =~ "Your branch is ahead of" ]]; then
+    echo -e "$PS1_COLOR_YELLOW"
+  elif [[ $git_status =~ "nothing to commit" ]] && \
+      [[ -z $git_commit ]]; then
+    echo -e "$PS1_COLOR_GREEN"
+  else
+    echo -e "$PS1_COLOR_ORANGE"
+  fi
+}
 
-PS1="${PS1_DIR}\
+function ps1_git_branch() {
+  local git_status
+  local on_branch
+  local on_commit
+  git_status="$(git status 2> /dev/null)"
+  on_branch="On branch ([^${IFS}]*)"
+  on_commit="HEAD detached at ([^${IFS}]*)"
+  if [[ $git_status =~ $on_branch ]]; then
+    local branch=${BASH_REMATCH[1]}
+    echo " $branch"
+  elif [[ $git_status =~ $on_commit ]]; then
+    local commit=${BASH_REMATCH[1]}
+    echo " $commit"
+  else
+    echo ""
+  fi
+}
 
-${PS1_USR} ${PS1_END}"
+function ps1_python_virtualenv() {
+  if [[ -z $VIRTUAL_ENV ]]; then
+    echo ""
+  else
+    echo "($(basename "$VIRTUAL_ENV"))"
+  fi
+}
+
+PS1_DIR="\[$PS1_BOLD\]\[$PS1_COLOR_BRIGHT_BLUE\]\w"
+PS1_GIT="\[\$(ps1_git_color)\]\[$PS1_BOLD\]\$(ps1_git_branch)\[$PS1_BOLD\]\[$PS1_COLOR_RESET\]"
+PS1_VIRTUAL_ENV="\[$PS1_BOLD\]\$(ps1_python_virtualenv)\[$PS1_BOLD\]\[$PS1_COLOR_RESET\]"
+# PS1_USR="\[$PS1_BOLD\]\[$PS1_COLOR_GOLD\]\u@\h"
+PS1_END="\[$PS1_BOLD\]\[$PS1_COLOR_GREEN\]$ \[$PS1_COLOR_RESET\]"
+PS1="${PS1_DIR} ${PS1_GIT} ${PS1_VIRTUAL_ENV}
+${PS1_END}"
 
 # }}}
 # ASDF: environment manager setup {{{
