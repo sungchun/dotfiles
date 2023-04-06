@@ -42,17 +42,17 @@ vfz(){
   #opens file in vim using fzf
   fzf_return=$(fzf)
   if [ $? == "0" ]; then
-    vim $fzf_return
+    nvim $fzf_return
   fi
 }
 
 cfz(){
   #changes to parent directory of file found by fzf
   fzf_return=$(fzf)
-  parent_directory=$(echo $fzf_return | rev | cut -d'/' -f2- | rev)
   if [ $? == "0" ]; then
-     echo "Navigated to: $parent_directory"
-     cd $parent_directory
+    parent_directory=$(echo $fzf_return | rev | cut -d'/' -f2- | rev)
+    echo "Navigated to: $parent_directory"
+    cd $parent_directory
   fi
 }
 

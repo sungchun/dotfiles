@@ -265,6 +265,9 @@ Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
 Plug 'nvim-lua/plenary.nvim'
 Plug 'nvim-telescope/telescope.nvim', { 'tag': '0.1.1' }
 
+"Iceberg
+Plug 'cocopon/iceberg.vim'
+
 call plug#end()
 
 " }}}
@@ -380,9 +383,9 @@ augroup END
 " }}}
 " General: Syntax highlighting {{{
 try
-  colorscheme PaperColorSlim
+  colorscheme iceberg
 catch
-  echo 'An error occured while configuring PaperColor'
+  echo 'An error occured while configuring iceBerg'
 endtry
 
 " }}}
@@ -652,6 +655,22 @@ autocmd BufEnter * if winnr('$') == 1 && exists('b:NERDTree') && b:NERDTree.isTa
 autocmd BufEnter * if bufname('#') =~ 'NERD_tree_\d\+' && bufname('%') !~ 'NERD_tree_\d\+' && winnr('$') > 1 |
     \ let buf=bufnr() | buffer# | execute "normal! \<C-W>w" | execute 'buffer'.buf | endif
 "  }}}
+" Package: lua extensions {{{
+
+function! s:safe_require(package)
+  try
+    execute "lua require('" . a:package . "')"
+  catch
+    echom "Error with lua require('" . a:package . "')"
+  endtry
+endfunction
+
+function! s:setup_lua_packages()
+  call s:safe_require('lua/config.telescope')
+endfunction
+
+call s:setup_lua_packages()
+" }}}
 " General: Cleanup {{{
 " commands that need to run at the end of my vimrc
 
